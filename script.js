@@ -2,9 +2,9 @@
 
 class WeatherApp {
     constructor() {
-        // OpenWeatherMap API key (you'll need to get your own from openweathermap.org)
         this.apiKey = '05a8dba1811a6e0ab1f9f9d5d432a302';
         this.apiUrl = 'https://api.openweathermap.org/data/2.5/weather';
+        this.sessionId = getSessionId();
         
         // DOM elements
         this.cityInput = document.getElementById('cityInput');
@@ -25,7 +25,9 @@ class WeatherApp {
         this.pressure = document.getElementById('pressure');
         this.visibility = document.getElementById('visibility');
         this.uvIndex = document.getElementById('uvIndex');
-        
+        this.historyContainer = document.getElementById('historyContainer');
+        this.historyList = document.getElementById('historyList');
+
         this.init();
     }
     
@@ -38,11 +40,11 @@ class WeatherApp {
             }
         });
         
-        // Display current date
         this.displayCurrentDate();
-        
-        // Check if geolocation is available and get user's location
+
         this.getCurrentLocationWeather();
+
+        this.loadSearchHistory();
     }
     
     displayCurrentDate() {
@@ -109,6 +111,7 @@ class WeatherApp {
             }
             
             const data = await response.json();
+            await this.saveSearchToDatabase(data);
             this.displayWeatherData(data);
             
         } catch (error) {
@@ -172,6 +175,77 @@ class WeatherApp {
     delay(ms) {
         return new Promise(resolve => setTimeout(resolve, ms));
     }
+
+    async saveSearchToDatabase(data) {
+        try {
+            const { error } = await supabaseClient
+                .from('weather_searches')
+                .insert({
+                    city_name: data.name,
+                    country_code: data.sys.country,
+                    temperature: data.main.temp,
+                    weather_description: data.weather[0].description,
+                    humidity: data.main.humidity,
+                    wind_speed: data.wind.speed,
+                    session_id: this.sessionId
+                });
+
+            if (error) {
+                console.error('Error saving to database:', error);
+            } else {
+                await this.loadSearchHistory();
+            }
+        } catch (error) {
+            console.error('Database error:', error);
+        }
+    }
+
+    async loadSearchHistory() {
+        try {
+            const { data, error } = await supabaseClient
+                .from('weather_searches')
+                .select('*')
+                .eq('session_id', this.sessionId)
+                .order('searched_at', { ascending: false })
+                .limit(5);
+
+            if (error) {
+                console.error('Error loading history:', error);
+                return;
+            }
+
+            this.displaySearchHistory(data);
+        } catch (error) {
+            console.error('Error loading history:', error);
+        }
+    }
+
+    displaySearchHistory(searches) {
+        if (!searches || searches.length === 0) {
+            this.historyContainer.style.display = 'none';
+            return;
+        }
+
+        this.historyContainer.style.display = 'block';
+        this.historyList.innerHTML = '';
+
+        searches.forEach(search => {
+            const historyItem = document.createElement('div');
+            historyItem.className = 'history-item';
+            historyItem.innerHTML = `
+                <div class="history-city">${search.city_name}, ${search.country_code}</div>
+                <div class="history-temp">${Math.round(search.temperature)}°C</div>
+                <div class="history-desc">${search.weather_description}</div>
+            `;
+
+            historyItem.addEventListener('click', () => {
+                this.cityInput.value = search.city_name;
+                this.handleSearch();
+            });
+
+            this.historyList.appendChild(historyItem);
+        });
+    }
 }
 
 // Initialize the weather app when the DOM is loaded
@@ -179,13 +253,4 @@ document.addEventListener('DOMContentLoaded', () => {
     new WeatherApp();
 });
 
-// Weather App is ready to use with real API data
-console.log(`
-🌤️ Weather App Ready!
-
-✅ Real API integration enabled
-✅ Replace 'YOUR_ACTUAL_API_KEY_HERE' on line 6 with your OpenWeatherMap API key
-✅ Get your free API key at: https://openweathermap.org/api
-
-The app will fetch live weather data once you add your API key.
-`);
+console.log('Weather App with Supabase integration ready!');
